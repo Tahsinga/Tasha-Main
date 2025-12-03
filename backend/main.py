@@ -7,6 +7,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import openai
 from datetime import datetime, timedelta
@@ -27,6 +28,22 @@ REQUESTS_PER_MINUTE = 60
 REQUESTS_PER_HOUR = 1000
 
 app = FastAPI(title="Tasha Backend", version="1.0.0")
+
+# Configure CORS. Set `ALLOWED_ORIGINS` env var to a comma-separated list
+# (e.g. https://example.com,http://10.0.2.2:8000) or leave empty to allow all.
+allowed = os.getenv("ALLOWED_ORIGINS", "*")
+if allowed.strip() == "*" or allowed.strip() == "":
+    origins = ["*"]
+else:
+    origins = [o.strip() for o in allowed.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ============= Request/Response Models =============
 class ChunkRequest(BaseModel):
@@ -203,13 +220,11 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
     if not req.question:
         raise HTTPException(status_code=400, detail="Question required")
     
-    # Debug: Log what we received from frontend
-    print(f'[RAG_ANSWER] DEBUG: req.api_key = {repr(req.api_key)[:80] if req.api_key else "NONE"}')
-    
-    # Use API key from request if provided, otherwise use env var
+    # Do not print sensitive API keys. Use API key from request if provided,
+    # otherwise use env var. The key itself is never logged.
     if req.api_key:
         openai.api_key = req.api_key
-        print(f'[RAG_ANSWER] ✅ Using API key from request (app Settings): {req.api_key[:20]}...')
+        print(f'[RAG_ANSWER] ✅ Using API key provided in request')
     elif os.getenv("OPENAI_API_KEY"):
         openai.api_key = os.getenv("OPENAI_API_KEY")
         print(f'[RAG_ANSWER] Using API key from environment')
@@ -291,11 +306,9 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
         
         answer_text = response["choices"][0]["message"]["content"]
         
-        # ✅ LOG OPENAI RESPONSE
-        print(f'[RAG_ANSWER] ✅ RESPONSE FROM OPENAI:')
-        print(f'  Answer length: {len(answer_text)} chars')
-        print(f'  Answer preview (first 200 chars): {answer_text[:200]}...')
-        print(f'  Full answer: {answer_text}')
+        # ✅ LOG OPENAI RESPONSE (non-sensitive): log length and small preview only
+        print(f'[RAG_ANSWER] ✅ RESPONSE FROM OPENAI: answer_len={len(answer_text)}')
+        print(f'  Answer preview (first 200 chars): {answer_text[:200].replace("\n", " ")}...')
         
         # Try to parse JSON response
         parsed = {"answer": answer_text, "citations": [], "confidence": 0.5}
@@ -425,4 +438,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Use the port provided by the hosting environment (Render sets $PORT)
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
