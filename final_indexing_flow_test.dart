@@ -1,6 +1,8 @@
 // final_indexing_flow_test.dart
 // Complete flow: Index book → Extract chunks → Send to OpenAI for training
 
+// ignore_for_file: avoid_print, prefer_interpolation_to_compose_strings
+
 import 'dart:io';
 
 void main() async {

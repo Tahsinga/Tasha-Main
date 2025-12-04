@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use_from_same_package
+// ignore_for_file: deprecated_member_use_from_same_package, use_super_parameters, deprecated_member_use
 
 import 'dart:async';
 import 'dart:math';

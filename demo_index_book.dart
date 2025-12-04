@@ -1,6 +1,8 @@
 // demo_index_book.dart
 // Demonstration: Index a sample book (edliz 2020.pdf) to show the fixed indexing works
 
+// ignore_for_file: avoid_print, unnecessary_brace_in_string_interps, prefer_interpolation_to_compose_strings
+
 import 'dart:io';
 import 'dart:typed_data';
 

@@ -1,6 +1,8 @@
 // demo_index_hiv_book.dart
 // Index the HIV Prevention/Treatment Guidelines book
 
+// ignore_for_file: avoid_print, prefer_interpolation_to_compose_strings
+
 import 'dart:io';
 
 void main() async {

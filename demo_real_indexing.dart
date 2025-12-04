@@ -1,6 +1,8 @@
 // demo_real_indexing.dart
 // REAL demonstration: Index edliz 2020.pdf with actual page count (~345 pages)
 
+// ignore_for_file: avoid_print, prefer_interpolation_to_compose_strings
+
 import 'dart:io';
 
 void main() async {

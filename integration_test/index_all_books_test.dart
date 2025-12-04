@@ -1,6 +1,8 @@
 // Integration test: index all books found in app's BooksSource using available
 // TXT fallbacks (bundled assets or emulator Documents/TxtBooks). This avoids
 // relying on pdf_render APIs that differ between patched versions.
+// ignore_for_file: avoid_print
+
 import 'dart:io';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
