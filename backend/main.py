@@ -9,7 +9,8 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import openai
+import openai as openai_pkg
+from openai import OpenAI
 from datetime import datetime, timedelta
 from functools import lru_cache
 import json
@@ -18,9 +19,16 @@ import json
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-openai.api_key = os.getenv("OPENAI_API_KEY", "")
-if not openai.api_key:
+DEFAULT_OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
+if not DEFAULT_OPENAI_KEY:
     logger.warning("OPENAI_API_KEY not set. Set it before deploying to production.")
+
+def get_openai_client(api_key: Optional[str] = None) -> OpenAI:
+    """Return an OpenAI client using the provided API key or the default env key."""
+    key = api_key if api_key is not None and api_key != "" else DEFAULT_OPENAI_KEY
+    # Construct a client. If key is empty the client will still be created but
+    # calls may fail; callers should handle mock behavior before calling.
+    return OpenAI(api_key=key) if key else OpenAI()
 
 # Simple in-memory rate limiting (for production, use Redis)
 REQUEST_LIMITS = {}
@@ -130,7 +138,10 @@ async def process_chunk(req: ChunkRequest, authorization: str = Header(None)):
         
         system_prompt = req.system_prompt or "You are a helpful assistant."
         
-        response = openai.ChatCompletion.create(
+        # Build OpenAI client (may use api_key passed in request via req.api_key)
+        client = get_openai_client(getattr(req, "api_key", None))
+
+        response = client.chat.completions.create(
             model=req.model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -138,22 +149,23 @@ async def process_chunk(req: ChunkRequest, authorization: str = Header(None)):
             ],
             temperature=req.temperature,
             max_tokens=req.max_tokens,
-            timeout=30
+            timeout=30,
         )
-        
-        answer = response["choices"][0]["message"]["content"]
+
+        # Response shape follows the Chat Completions format
+        answer = response.choices[0].message["content"] if hasattr(response, "choices") else str(response)
         logger.info(f"[process_chunk] success user={user_id}")
         
         return {
             "success": True,
             "result": answer,
             "model": req.model,
-            "usage": response.get("usage", {})
+            "usage": getattr(response, "usage", {})
         }
-    except openai.error.Timeout:
+    except openai_pkg.APITimeoutError:
         logger.error(f"[process_chunk] timeout user={user_id}")
         raise HTTPException(status_code=504, detail="OpenAI request timed out")
-    except openai.error.RateLimitError:
+    except openai_pkg.RateLimitError:
         logger.error(f"[process_chunk] rate limit user={user_id}")
         raise HTTPException(status_code=429, detail="OpenAI rate limit hit")
     except Exception as e:
@@ -174,10 +186,14 @@ async def get_embeddings(req: EmbedRequest, authorization: str = Header(None)):
     try:
         logger.info(f"[embeddings] user={user_id} count={len(req.texts)}")
 
-        # If OPENAI key is missing or we're using a local/test key, return deterministic mock embeddings
-        if not openai.api_key or (openai.api_key.startswith("sk-test") or openai.api_key.startswith("sk-proj-test")):
+        # Build client using key from request (if provided) or default env key
+        client = get_openai_client(getattr(req, "api_key", None))
+        client_key = getattr(getattr(client, "_config", None), "api_key", "") or ""
+
+        # If OPENAI key is missing or it's a known test key, return deterministic mock embeddings
+        if not client_key or client_key.startswith("sk-test") or client_key.startswith("sk-proj-test"):
             import hashlib, random
-            logger.info("[embeddings] Using MOCK embeddings because OPENAI_API_KEY not set or is test key")
+            logger.info("[embeddings] Using MOCK embeddings because OPENAI API key not set or is test key")
             embeddings = []
             DIM = 1536
             for t in req.texts:
@@ -191,12 +207,12 @@ async def get_embeddings(req: EmbedRequest, authorization: str = Header(None)):
                 vec = [float(x / norm) for x in vec]
                 embeddings.append(vec)
         else:
-            response = openai.Embedding.create(
+            response = client.embeddings.create(
                 model=req.model,
                 input=req.texts,
-                timeout=30
+                timeout=30,
             )
-            embeddings = [item["embedding"] for item in response["data"]]
+            embeddings = [item.embedding for item in response.data]
         logger.info(f"[embeddings] success user={user_id} count={len(embeddings)}")
         
         return {
@@ -216,27 +232,24 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
     
     if not check_rate_limit(user_id):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    
-    if not req.question:
-        raise HTTPException(status_code=400, detail="Question required")
-    
-    # Do not print sensitive API keys. Use API key from request if provided,
-    # otherwise use env var. The key itself is never logged.
-    if req.api_key:
-        openai.api_key = req.api_key
-        print(f'[RAG_ANSWER] ✅ Using API key provided in request')
-    elif os.getenv("OPENAI_API_KEY"):
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        print(f'[RAG_ANSWER] Using API key from environment')
-    else:
-        # If no real key available, use mock response for testing
+    # Use API key from request if provided, otherwise fall back to the default env key.
+    api_key_to_use = req.api_key if getattr(req, "api_key", None) else DEFAULT_OPENAI_KEY
+    client = get_openai_client(api_key_to_use)
+
+    # If no key available, return a deterministic MOCK response for testing
+    client_key = getattr(getattr(client, "_config", None), "api_key", None)
+    if not client_key:
         print(f'[RAG_ANSWER] ⚠️  No API key provided, using MOCK response for testing')
-        mock_answer = f"Based on the provided excerpts about {req.chunks[0].get('book', 'the book') if req.chunks else 'medical guidelines'}, here is relevant information: The provided medical guidelines contain important information. This is a mock response because no valid API key is available. Please provide a real OpenAI API key in your app Settings or set OPENAI_API_KEY environment variable."
+        mock_answer = (
+            f"Based on the provided excerpts about {req.chunks[0].get('book', 'the book') if req.chunks else 'medical guidelines'}, "
+            "here is relevant information: The provided medical guidelines contain important information. "
+            "This is a mock response because no valid API key is available. Please provide a real OpenAI API key in your app Settings or set OPENAI_API_KEY environment variable."
+        )
         return {
             "success": True,
             "answer": mock_answer,
             "citations": [{"text": chunk.get("text", "")[:200], "book": chunk.get("book", "Unknown")} for chunk in req.chunks[:3]],
-            "confidence": 0.5
+            "confidence": 0.5,
         }
     
     try:
@@ -256,9 +269,11 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
             text = chunk.get("text", "")
             preview = text[:100] + '...' if len(text) > 100 else text
             print(f'  📦 Chunk[{i}] book="{book}" page={start_page} len={len(text)} preview="{preview}"')
-        
         logger.info(f"[rag_answer] user={user_id} question_len={len(req.question)} chunks={len(req.chunks)} chars={total_chunk_chars}")
         
+        client = get_openai_client(api_key_to_use)
+        
+        # Build prompt
         # Build prompt
         system_prompt = req.system_prompt or (
             "You are a helpful medical assistant. Your task is to ALWAYS provide a comprehensive answer based on the provided excerpts. "
@@ -290,10 +305,7 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
         print(f'  Model: {req.model}')
         print(f'  Max tokens: {req.max_tokens}')
         print(f'  System prompt length: {len(system_prompt)} chars')
-        print(f'  User message length: {len(user_message)} chars')
-        print(f'  Excerpt text preview (first 300 chars): {excerpt_text[:300]}...')
-        
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model=req.model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -301,10 +313,21 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
             ],
             temperature=req.temperature,
             max_tokens=req.max_tokens,
-            timeout=30
+            timeout=30,
         )
-        
-        answer_text = response["choices"][0]["message"]["content"]
+
+        # Extract answer text robustly from the response object
+        answer_text = ""
+        if hasattr(response, "choices") and len(response.choices) > 0:
+            choice0 = response.choices[0]
+            msg = getattr(choice0, "message", None)
+            if isinstance(msg, dict):
+                answer_text = msg.get("content", "")
+            else:
+                answer_text = getattr(msg, "content", "") or str(choice0)
+        else:
+            # Fallback to stringifying the response
+            answer_text = str(response)
         
         # ✅ LOG OPENAI RESPONSE (non-sensitive): log length and small preview only
         print(f'[RAG_ANSWER] ✅ RESPONSE FROM OPENAI: answer_len={len(answer_text)}')
@@ -335,7 +358,7 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
             "citations": parsed.get("citations", []),
             "confidence": parsed.get("confidence", 0.5),
             "model": req.model,
-            "usage": response.get("usage", {})
+            "usage": getattr(response, "usage", {})
         }
     except Exception as e:
         logger.error(f"[rag_answer] error user={user_id} {str(e)}")
@@ -385,22 +408,30 @@ async def train_book(req: TrainBookRequest, authorization: str = Header(None)):
                 end_page = chunk.get("end_page", start_page)
                 text = chunk.get("text", "")
                 excerpt_text += f"Book: {book} Pages: {start_page}-{end_page}\n{text}\n\n---\n\n"
-            
-            prompt = f"Generate 8-12 concise medical Q&A pairs from these excerpts. Return a JSON array of objects with 'q' and 'a' keys only.\n\n{excerpt_text}"
-            
             try:
-                response = openai.ChatCompletion.create(
+                client = get_openai_client(getattr(req, "api_key", None))
+                response = client.chat.completions.create(
                     model=req.model,
                     messages=[
                         {"role": "system", "content": "You are a medical Q&A generator. Extract factual Q&A pairs from the provided text."},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": excerpt_text + "\n\nGenerate Q&A pairs as JSON array: [{\"question\": \"...\", \"answer\": \"...\"}, ...]"}
                     ],
                     temperature=req.temperature,
                     max_tokens=req.max_tokens,
-                    timeout=30
+                    timeout=30,
                 )
-                
-                content = response["choices"][0]["message"]["content"]
+
+                # Extract content robustly
+                content = ""
+                if hasattr(response, "choices") and len(response.choices) > 0:
+                    c0 = response.choices[0]
+                    msg = getattr(c0, "message", None)
+                    if isinstance(msg, dict):
+                        content = msg.get("content", "")
+                    else:
+                        content = getattr(msg, "content", "") or str(c0)
+                else:
+                    content = str(response)
                 
                 # Parse JSON
                 try:
