@@ -12,8 +12,8 @@ class BackendConfig {
     if (_instance != null) return _instance!;
     
     final prefs = await SharedPreferences.getInstance();
-    // Default to the developer PC IP for local device testing (change back for production)
-    final url = prefs.getString('BACKEND_URL') ?? 'http://192.168.110.136:8000';
+    // Default to production Render server
+    final url = prefs.getString('BACKEND_URL') ?? 'https://tasha-main.onrender.com';
     final token = prefs.getString('APP_AUTH_TOKEN') ?? 'test-app-token';
     
     if (token == 'test-app-token') {
@@ -42,7 +42,7 @@ class BackendConfig {
   static Future<Map<String, String>> getConfig() async {
     final prefs = await SharedPreferences.getInstance();
     return {
-      'BACKEND_URL': prefs.getString('BACKEND_URL') ?? 'http://192.168.110.136:8000',
+      'BACKEND_URL': prefs.getString('BACKEND_URL') ?? 'https://tasha-main.onrender.com',
       'APP_AUTH_TOKEN': prefs.getString('APP_AUTH_TOKEN') ?? 'test-app-token',
     };
   }
