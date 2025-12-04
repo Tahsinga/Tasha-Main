@@ -24,8 +24,11 @@ if not DEFAULT_OPENAI_KEY:
     logger.warning("OPENAI_API_KEY not set. Set it before deploying to production.")
 
 def get_openai_client(api_key: Optional[str] = None) -> OpenAI:
-    """Return an OpenAI client using the provided API key or the default env key."""
-    key = api_key if api_key is not None and api_key != "" else DEFAULT_OPENAI_KEY
+    """Return an OpenAI client using the provided API key or the environment key.
+    This reads `OPENAI_API_KEY` dynamically from os.environ so changes take effect
+    after a process restart and avoid stale import-time values.
+    """
+    key = api_key if api_key else os.getenv("OPENAI_API_KEY", "")
     # Construct a client. If key is empty the client will still be created but
     # calls may fail; callers should handle mock behavior before calling.
     return OpenAI(api_key=key) if key else OpenAI()
