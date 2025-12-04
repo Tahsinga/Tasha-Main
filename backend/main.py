@@ -468,6 +468,18 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content={"success": False, "error": exc.detail}
     )
 
+
+@app.get("/internal/openai_key_status")
+async def openai_key_status(authorization: str = Header(None)):
+    """Internal endpoint to check whether OPENAI_API_KEY is set on the server.
+    Returns a boolean `has_key` but never returns the key itself. Protected by
+    the same Authorization header check used elsewhere.
+    """
+    # Reuse the same simple auth check
+    verify_auth(authorization)
+    key = os.getenv("OPENAI_API_KEY", "")
+    return {"success": True, "has_key": bool(key)}
+
 if __name__ == "__main__":
     import uvicorn
     # Use the port provided by the hosting environment (Render sets $PORT)
