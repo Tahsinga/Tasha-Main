@@ -2,6 +2,13 @@
 # Put your OPENAI_API_KEY in .env file or environment variable
 # Run with: uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
+# Load .env file early (before any os.getenv calls)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; rely on environment variables directly
+
 import os
 import logging
 from typing import Optional, List, Dict, Any
@@ -19,9 +26,11 @@ import json
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DEFAULT_OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
+DEFAULT_OPENAI_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 if not DEFAULT_OPENAI_KEY:
     logger.warning("OPENAI_API_KEY not set. Set it before deploying to production.")
+else:
+    logger.info("✓ OPENAI_API_KEY found in environment (not logged for security).")
 
 def get_openai_client(api_key: Optional[str] = None) -> OpenAI:
     """Return an OpenAI client using the provided API key or the environment key.
@@ -166,13 +175,13 @@ async def process_chunk(req: ChunkRequest, authorization: str = Header(None)):
             "usage": getattr(response, "usage", {})
         }
     except openai_pkg.APITimeoutError:
-        logger.error(f"[process_chunk] timeout user={user_id}")
+        logger.exception(f"[process_chunk] timeout user={user_id}")
         raise HTTPException(status_code=504, detail="OpenAI request timed out")
     except openai_pkg.RateLimitError:
-        logger.error(f"[process_chunk] rate limit user={user_id}")
+        logger.exception(f"[process_chunk] rate limit user={user_id}")
         raise HTTPException(status_code=429, detail="OpenAI rate limit hit")
     except Exception as e:
-        logger.error(f"[process_chunk] error user={user_id} {str(e)}")
+        logger.exception(f"[process_chunk] error user={user_id} {str(e)}")
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 @app.post("/embeddings")
@@ -189,9 +198,13 @@ async def get_embeddings(req: EmbedRequest, authorization: str = Header(None)):
     try:
         logger.info(f"[embeddings] user={user_id} count={len(req.texts)}")
 
-        # Build client using key from request (if provided) or default env key
-        client = get_openai_client(getattr(req, "api_key", None))
-        client_key = getattr(getattr(client, "_config", None), "api_key", "") or ""
+        # Prefer API key passed in the request; otherwise use the runtime env var.
+        # Trim whitespace to avoid false negatives from accidental spaces.
+        passed_key = getattr(req, "api_key", None)
+        client_key = (passed_key or os.getenv("OPENAI_API_KEY", "")).strip()
+        # Build client using the passed key if present, otherwise let get_openai_client
+        # fall back to using the environment key.
+        client = get_openai_client(passed_key or None)
 
         # If OPENAI key is missing or it's a known test key, return deterministic mock embeddings
         if not client_key or client_key.startswith("sk-test") or client_key.startswith("sk-proj-test"):
@@ -225,7 +238,7 @@ async def get_embeddings(req: EmbedRequest, authorization: str = Header(None)):
             "count": len(embeddings)
         }
     except Exception as e:
-        logger.error(f"[embeddings] error user={user_id} {str(e)}")
+        logger.exception(f"[embeddings] error user={user_id} {str(e)}")
         raise HTTPException(status_code=500, detail=f"Embedding failed: {str(e)}")
 
 @app.post("/rag/answer")
@@ -235,12 +248,12 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
     
     if not check_rate_limit(user_id):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    # Use API key from request if provided, otherwise fall back to the default env key.
-    api_key_to_use = req.api_key if getattr(req, "api_key", None) else DEFAULT_OPENAI_KEY
-    client = get_openai_client(api_key_to_use)
+    # Use API key from request if provided; otherwise fall back to runtime env var.
+    passed_key = req.api_key if getattr(req, "api_key", None) else None
+    client_key = (passed_key or os.getenv("OPENAI_API_KEY", "")).strip()
+    client = get_openai_client(passed_key or None)
 
     # If no key available, return a deterministic MOCK response for testing
-    client_key = getattr(getattr(client, "_config", None), "api_key", None)
     if not client_key:
         print(f'[RAG_ANSWER] ⚠️  No API key provided, using MOCK response for testing')
         mock_answer = (
@@ -274,7 +287,7 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
             print(f'  📦 Chunk[{i}] book="{book}" page={start_page} len={len(text)} preview="{preview}"')
         logger.info(f"[rag_answer] user={user_id} question_len={len(req.question)} chunks={len(req.chunks)} chars={total_chunk_chars}")
         
-        client = get_openai_client(api_key_to_use)
+        client = get_openai_client(passed_key or None)
         
         # Build prompt
         # Build prompt
@@ -364,7 +377,7 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
             "usage": getattr(response, "usage", {})
         }
     except Exception as e:
-        logger.error(f"[rag_answer] error user={user_id} {str(e)}")
+        logger.exception(f"[rag_answer] error user={user_id} {str(e)}")
         raise HTTPException(status_code=500, detail=f"RAG failed: {str(e)}")
 
 @app.post("/train/book")
@@ -448,7 +461,7 @@ async def train_book(req: TrainBookRequest, authorization: str = Header(None)):
                 except:
                     logger.warning(f"[train_book] batch {batch_idx} failed to parse JSON")
             except Exception as e:
-                logger.error(f"[train_book] batch {batch_idx} error: {str(e)}")
+                logger.exception(f"[train_book] batch {batch_idx} error: {str(e)}")
         
         logger.info(f"[train_book] success user={user_id} total_pairs={len(qa_pairs)}")
         
@@ -460,7 +473,7 @@ async def train_book(req: TrainBookRequest, authorization: str = Header(None)):
             "batches": len(batches)
         }
     except Exception as e:
-        logger.error(f"[train_book] error user={user_id} {str(e)}")
+        logger.exception(f"[train_book] error user={user_id} {str(e)}")
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
 
 @app.exception_handler(HTTPException)
@@ -485,6 +498,11 @@ async def openai_key_status(authorization: str = Header(None)):
 
 if __name__ == "__main__":
     import uvicorn
+    # Log presence of API key at startup (not the value, for security)
+    key_present = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    logger.info("=" * 60)
+    logger.info("STARTUP: OPENAI_API_KEY present in environment: %s", key_present)
+    logger.info("=" * 60)
     # Use the port provided by the hosting environment (Render sets $PORT)
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
