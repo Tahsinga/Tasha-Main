@@ -308,7 +308,8 @@ async def rag_answer(req: BatchRAGRequest, authorization: str = Header(None)):
         
         # ✅ LOG OPENAI RESPONSE (non-sensitive): log length and small preview only
         print(f'[RAG_ANSWER] ✅ RESPONSE FROM OPENAI: answer_len={len(answer_text)}')
-        print(f'  Answer preview (first 200 chars): {answer_text[:200].replace("\n", " ")}...')
+        preview_text = answer_text[:200].replace("\n", " ")
+        print(f'  Answer preview (first 200 chars): {preview_text}...')
         
         # Try to parse JSON response
         parsed = {"answer": answer_text, "citations": [], "confidence": 0.5}
