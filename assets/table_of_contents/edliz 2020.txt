@@ -1,23 +1,50 @@
-Table of Contents
-Foreword.                                           i
-.
-Acknowledgements.                                      ii
-Table of Contents.                                       iii
-List of Tables.                                         iv
-Acronyms / Abbreviations.                                   vi
-CHAPTER1:Executive Summary                                1
-CHAPTER 2: HIV Testing Services (HTS) for Children, Adolescents and Adults and Linkage to Prevention and Treatment.                           4
-CHAPTER 3: Principles of Antiretroviral Therapy                       12
-CHAPTER 4: Initiation of Antiretroviral Therapy in Adults and Adolescents.          15
-CHAPTER 5: Recommended Treatment Regimens for Adults and Adolescents.       22
-CHAPTER 6: Prevention of Mother to Child Transmission of HIV               28
-CHAPTER 7: Paediatric Antiretroviral Treatment                       39
-CHAPTER 8: Monitoring Patients on Antiretroviral Therapy                  51
-CHAPTER 9: Managing Opportunistic Infections and Comorbidities             61
-CHAPTER 10: Managing Advanced HIV Disease (AHD)                   80
-CHAPTER 11: HIV Prevention                                86
-CHAPTER 12: Reporting of Adverse Drug Reactions (ADRs) By Health Workers.       94
-Annex 1. WHO clinical staging of HIV disease in adults, adolescents & children.       100
-Appendix 2: Stepped Care Algorithm for Screening Depression and Anxiety Among Clients in
-HIV Care Treatment.                              104
-Appendix 3: Mental Health Client Referral Pathway                     105
+EDILZ 4th EDITION 2021                                           IX
+Foreword                                                         VI
+The Standard Treatment Guidelines & Essential Medicines List
+for Zimbabwe (STGs/EMLZ) 2021                                   XI
+Major Highlights in the Latest EDILZ                            XIV
+Table of Contents                                               XVI
+
+1. Anti-Microbial Treatment and Prophylaxis Guidelines          1
+2. Infectious Disease Prevention and Control Measures           12
+3. Severe Acute Respiratory Syndrome Coronavirus-2 (SARS-CoV-2) 15
+4. Paediatric Conditions                                        28
+4A. Paediatric HIV Conditions                                   75
+5. Immunisation                                                 80
+6. Obstetrics and Gynaecological Conditions                     88
+7. Sexually Transmitted Infections                              105
+8. HIV Related Disease                                          121
+9. Anti Retroviral Therapy                                      131
+10. Prophylaxis for PMTCT                                       132
+11. Parasitic Diseases                                          175
+12. Tuberculosis                                                179
+13. Malaria                                                     187
+14. Respiratory Conditions                                      210
+15. Cardiovascular Disease                                      237
+16. Gastrointestinal Conditions                                 247
+17. Renal Tract Conditions                                      256
+18. Musculoskeletal and Joint Conditions                        271
+19. Haematologic Conditions                                     285
+20. Metabolic & Endocrine Conditions                            289
+21. Neurological Conditions                                     299
+22. Mental Health                                               301
+23. Eye and Visual Conditions                                   313
+24. Common Oral Conditions                                      333
+25. Ear Nose and Throat Disorders                               345
+26. Skin Conditions                                             355
+27. Anaemias                                                    370
+28. Pain Management & Care of the Terminally Ill                378
+29. Medicines and the Elderly                                   386
+30. Dermatology and Blood Products                              389
+31. Treatment of Acute Red Accident                             398
+32. Anaphylaxis                                                 413
+33. Poisoning                                                   417
+34. Medicines Used in Anaesthesia                               437
+35. Surgical Conditions                                         457
+36. Systemic Therapy for Cancer                                 468
+37. Reporting Adverse Drug Reactions                            478
+38. Donation of Human Organs & Tissues                          479
+39. Categorisation of Medicines on the 6th Essential List       486
+
+Specific Drug Essential Medicine List in Zimbabwe               504
+Index by Medicine Name                                          512

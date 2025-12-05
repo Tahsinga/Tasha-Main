@@ -30,6 +30,8 @@ import 'services/ocr_worker.dart';
 import 'services/rag_service.dart';
 import 'services/vector_db.dart';
 import 'ui/chunks_viewer.dart';
+import 'ui/offline_chat_bot.dart';
+import 'ui/debug_qa_list.dart';
 
 void main() {
   runApp(const MyApp());
@@ -174,8 +176,78 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// Reusable footer navigation used across pages. If `onDestinationSelected` is
+// provided it will be used, otherwise default navigation behavior is applied.
+class AppFooter extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int>? onDestinationSelected;
+
+  const AppFooter({super.key, this.selectedIndex = 0, this.onDestinationSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        boxShadow: [
+          BoxShadow(
+            color: const Color.fromRGBO(158, 158, 158, 0.2),
+            blurRadius: 10,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: NavigationBar(
+        selectedIndex: selectedIndex,
+        onDestinationSelected: (index) {
+          if (onDestinationSelected != null) {
+            onDestinationSelected!(index);
+            return;
+          }
+
+          // Default navigation behaviour: replace stack with HomePage when
+          // switching to Library/Updates, or push Settings page when selected.
+          if (index == 0) {
+            Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => HomePage(initialIndex: 0)),
+                (route) => false);
+            return;
+          }
+          if (index == 1) {
+            Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => HomePage(initialIndex: 1)),
+                (route) => false);
+            return;
+          }
+          // index == 2 => Settings
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+        },
+        backgroundColor: Colors.white,
+        height: 70,
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.library_books_outlined),
+            selectedIcon: Icon(Icons.library_books),
+            label: 'Library',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.update_outlined),
+            selectedIcon: Icon(Icons.update),
+            label: 'Updates',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final int initialIndex;
+  const HomePage({super.key, this.initialIndex = 0});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -209,6 +281,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialIndex;
     _pdfController = PdfViewerController();
     _searchController.addListener(_onSearchChanged);
     // Load books and ensure UI updates after they're loaded
@@ -1290,6 +1363,36 @@ If you encounter issues with this book, please report the filename and error det
     });
   }
 
+  // Helper to build nice tool buttons for the top bar
+  Widget _buildToolButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Tooltip(
+        message: tooltip,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: IconButton(
+            icon: Icon(icon, color: Colors.white, size: 20),
+            onPressed: onPressed,
+            padding: const EdgeInsets.all(6),
+            splashRadius: 20,
+          ),
+        ),
+      ),
+    );
+  }
+
   void _toggleBookmark(File book) {
     setState(() {
       final id = book.path;
@@ -2149,142 +2252,184 @@ If you encounter issues with this book, please report the filename and error det
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        title: _activeBook == null
-            ? const Text('E-Book Library',
-            style: TextStyle(
-                fontWeight: FontWeight.w900,
-              fontSize: 18
-            ))
-            : Text(_activeBook!.path.split(Platform.pathSeparator).last,
-            overflow: TextOverflow.ellipsis),
-        actions: _activeBook == null
-            ? [
-          IconButton(
-            icon: const Icon(Icons.bookmarks_outlined),
-            tooltip: 'Bookmarks',
-            onPressed: () async {
-              // Open bookmarks page and allow it to open books / remove bookmarks
-              final result = await Navigator.of(context).push(
-                  MaterialPageRoute(
-                      builder: (_) => BookmarksPage(
-                        bookmarks: _bookmarks.toList(),
-                        onOpen: (path) {
-                          // find file by path and open
-                          final f = _allBooks.firstWhere(
-                                  (b) => b.path == path,
-                              orElse: () => File(path));
-                          _openBook(f);
-                        },
-                        onRemove: (path) {
-                          setState(() {
-                            _bookmarks.remove(path);
-                          });
-                        },
-                      )));
-              // no-op for now with result
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.sync_outlined),
-            tooltip: 'Sync now',
-            onPressed: () async {
-              final s = FirebaseSync(
-                  'https://tashahit400-default-rtdb.asia-southeast1.firebasedatabase.app/');
-              ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Starting sync...')));
-              try {
-                final unsyncedBefore = await s.getUnsyncedCount();
-                final uploaded = await s.uploadUnsynced();
-                await s.downloadAndMerge();
-                final unsyncedAfter = await s.getUnsyncedCount();
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(
-                        'Sync done: uploaded $uploaded, unsynced before=$unsyncedBefore, after=$unsyncedAfter')));
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Sync failed: $e')));
-              }
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.notifications_none_rounded),
-            onPressed: () => setState(() => _currentIndex = 1),
-          ),
-          IconButton(
-            icon: const Icon(Icons.bug_report_outlined),
-            tooltip: 'Asset diagnostics',
-            onPressed: _showAssetDiagnostics,
-          ),
-          IconButton(
-            icon: const Icon(Icons.file_download),
-            tooltip: 'Force import assets',
-            onPressed: () async {
-              await _forceImportAssets();
-            },
-          ),
-        ]
-            : [
-            IconButton(
-              icon: const Icon(Icons.menu_book),
-              onPressed: _showTOCInScaffold,
-            ),
-            // New: Index active book
-            IconButton(
-              key: const Key('index-book-button'),
-              icon: const Icon(Icons.document_scanner_outlined),
-              tooltip: 'Index book',
-              onPressed: () async {
-                if (_activeBook == null) return;
-                await _startIndexActiveBook();
-              },
-            ),
-            // New: Train active book (OpenAI)
-            IconButton(
-              icon: const Icon(Icons.auto_fix_high),
-              tooltip: 'Train book',
-              onPressed: () async {
-                if (_activeBook == null) return;
-                await _trainActiveBook();
-              },
-            ),
-            IconButton(
-              icon: const Icon(Icons.layers_outlined),
-              tooltip: 'View chunks',
-              onPressed: () {
-                if (_activeBook != null) {
-                  final bookId = _activeBook!.path.split(Platform.pathSeparator).last;
-                  final bookName = bookId.replaceAll(RegExp(r'\.pdf$'), '').replaceAll(RegExp(r'[_-]'), ' ');
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ChunksViewerPage(
-                        bookId: bookId,
-                        bookName: bookName,
-                      ),
+      appBar: _activeBook == null
+          ? AppBar(
+              title: const Text('E-Book Library',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 18
+                  )),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.bookmarks_outlined),
+                  tooltip: 'Bookmarks',
+                  onPressed: () async {
+                    final result = await Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => BookmarksPage(
+                                  bookmarks: _bookmarks.toList(),
+                                  onOpen: (path) {
+                                    final f = _allBooks.firstWhere(
+                                        (b) => b.path == path,
+                                        orElse: () => File(path));
+                                    _openBook(f);
+                                  },
+                                  onRemove: (path) {
+                                    setState(() {
+                                      _bookmarks.remove(path);
+                                    });
+                                  },
+                                )));
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.bug_report),
+                  tooltip: 'Debug QA',
+                  onPressed: () {
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DebugQaListPage()));
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.sync_outlined),
+                  tooltip: 'Sync now',
+                  onPressed: () async {
+                    final s = FirebaseSync(
+                        'https://tashahit400-default-rtdb.asia-southeast1.firebasedatabase.app/');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Starting sync...')));
+                    try {
+                      final unsyncedBefore = await s.getUnsyncedCount();
+                      final uploaded = await s.uploadUnsynced();
+                      await s.downloadAndMerge();
+                      final unsyncedAfter = await s.getUnsyncedCount();
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(
+                              'Sync done: uploaded $uploaded, unsynced before=$unsyncedBefore, after=$unsyncedAfter')));
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Sync failed: $e')));
+                    }
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.notifications_none_rounded),
+                  onPressed: () => setState(() => _currentIndex = 1),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.bug_report_outlined),
+                  tooltip: 'Asset diagnostics',
+                  onPressed: _showAssetDiagnostics,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.file_download),
+                  tooltip: 'Force import assets',
+                  onPressed: () async {
+                    await _forceImportAssets();
+                  },
+                ),
+              ],
+            )
+          : AppBar(
+              toolbarHeight: 115,
+              backgroundColor: const Color(0xFF0B5394),
+              elevation: 8,
+              flexibleSpace: Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF0B5394), Color(0xFF1565C0)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.15),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
                     ),
-                  );
-                }
-              },
+                  ],
+                ),
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Book Name
+                        Flexible(
+                          child: Text(
+                            _stripPdfExt(_activeBook!.path.split(Platform.pathSeparator).last),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 20,
+                              color: Colors.white,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        // Centered Tool Buttons
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildToolButton(
+                                icon: Icons.menu_book,
+                                tooltip: 'Table of Contents',
+                                onPressed: _showTOCInScaffold,
+                              ),
+                              _buildToolButton(
+                                icon: Icons.auto_fix_high,
+                                tooltip: 'Train book',
+                                onPressed: () async {
+                                  if (_activeBook == null) return;
+                                  await _trainActiveBook();
+                                },
+                              ),
+                              _buildToolButton(
+                                icon: Icons.layers_outlined,
+                                tooltip: 'View chunks',
+                                onPressed: () {
+                                  if (_activeBook != null) {
+                                    final bookId = _activeBook!.path.split(Platform.pathSeparator).last;
+                                    final bookName = bookId.replaceAll(RegExp(r'\.pdf$'), '').replaceAll(RegExp(r'[_-]'), ' ');
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => ChunksViewerPage(
+                                          bookId: bookId,
+                                          bookName: bookName,
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                              _buildToolButton(
+                                icon: _pdfBookmarked
+                                    ? Icons.bookmark
+                                    : Icons.bookmark_border,
+                                tooltip: _pdfBookmarked ? 'Remove bookmark' : 'Add bookmark',
+                                onPressed: _toggleBookmarkForActive,
+                              ),
+                              _buildToolButton(
+                                icon: Icons.close,
+                                tooltip: 'Close book',
+                                onPressed: _closeBook,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
-            IconButton(
-              icon: const Icon(Icons.share),
-              onPressed: () =>
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('Share not implemented'))),
-            ),
-            IconButton(
-              icon: Icon(_pdfBookmarked
-                  ? Icons.bookmark
-                  : Icons.bookmark_border),
-              onPressed: _toggleBookmarkForActive,
-            ),
-            IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: _closeBook,
-            ),
-          ],
-      ),
       body: SafeArea(
         child: Padding(
           padding: _activeBook != null
@@ -2505,87 +2650,52 @@ If you encounter issues with this book, please report the filename and error det
               : const SettingsPage())),
         ),
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          boxShadow: [
-            BoxShadow(
-              color: const Color.fromRGBO(158, 158, 158, 0.2),
-              blurRadius: 10,
-              offset: const Offset(0, -5),
-            ),
-          ],
-        ),
-        child: NavigationBar(
-          selectedIndex: _currentIndex,
-          onDestinationSelected: (index) {
-            // Open Settings as a full page (push) so it uses its own Scaffold and AppBar,
-            // matching the appearance when opened from the Updates page.
-            if (index == 2) {
-              Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => const SettingsPage(),
-              ));
-              return;
-            }
-            setState(() {
-              _currentIndex = index;
-              _activeBook = null; // close any open book when switching tabs
-            });
-          },
-          backgroundColor: Colors.white,
-          height: 70,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.library_books_outlined),
-              selectedIcon: Icon(Icons.library_books),
-              label: 'Library',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.update_outlined),
-              selectedIcon: Icon(Icons.update),
-              label: 'Updates',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: 'Settings',
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-            // Determine currently selected book id (filename) if any
-            String? selectedBookForChat =
-              _activeBook == null ? null : _activeBook!.path.split(Platform.pathSeparator).last;
-
-          // If no active book, prompt user to pick one to scope the chat (optional)
-          if (selectedBookForChat == null) {
-            final pick = await showBookPickerDialog(
-                context, _filteredBooks,
-                title: 'Select a book to scope chat');
-            selectedBookForChat = pick;
+      bottomNavigationBar: AppFooter(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) {
+          if (index == 2) {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const SettingsPage(),
+            ));
+            return;
           }
-
-          // Let user choose Online or Offline chat
-          final choice = await showChatModeDialog(context);
-
-          if (choice == 'online') {
-            // ignore: use_build_context_synchronously
-            showDialog(
-                context: context,
-                builder: (_) => ChatBotDialog(
-                    bookCount: _filteredBooks.length,
-                    selectedBook: selectedBookForChat));
-          } else if (choice == 'offline') {
-            // ignore: use_build_context_synchronously
-            showDialog(
-                context: context,
-                builder: (_) =>
-                    OfflineChatDialog(selectedBook: selectedBookForChat));
-          }
+          setState(() {
+            _currentIndex = index;
+            _activeBook = null; // close any open book when switching tabs
+          });
         },
-        child: const Icon(Icons.chat),
       ),
+      floatingActionButton: _activeBook != null
+          ? FloatingActionButton(
+              onPressed: () async {
+                // Book is open, so use it as the selected book
+                final selectedBookForChat =
+                    _activeBook!.path.split(Platform.pathSeparator).last;
+
+                // Let user choose Online or Offline chat
+                final choice = await showChatModeDialog(context);
+
+                if (choice == 'online') {
+                  // ignore: use_build_context_synchronously
+                  showDialog(
+                      context: context,
+                      builder: (_) => ChatBotDialog(
+                          bookCount: _filteredBooks.length,
+                          selectedBook: selectedBookForChat));
+                } else if (choice == 'offline') {
+                  // ignore: use_build_context_synchronously
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => OfflineChatBotPage(
+                        selectedBook: selectedBookForChat,
+                      ),
+                    ),
+                  );
+                }
+              },
+              child: const Icon(Icons.chat),
+            )
+          : null,
     );
   }
 }
@@ -3216,26 +3326,43 @@ class _PdfViewerPageState extends State<PdfViewerPage> {
       appBar: AppBar(
         backgroundColor: Colors.deepPurple,
         elevation: 0,
-        title: Text(
-          widget.file.path.split(Platform.pathSeparator).last,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w600),
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Book name at the top
+            Padding(
+              padding: const EdgeInsets.only(left: 16, top: 8, right: 16),
+              child: Text(
+                widget.file.path.split(Platform.pathSeparator).last,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+            // Buttons below the name
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.menu_book_outlined),
+                  onPressed: _showTOC,
+                  tooltip: 'Table of Contents',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.share_outlined),
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Share feature coming soon!')),
+                    );
+                  },
+                  tooltip: 'Share',
+                ),
+              ],
+            ),
+          ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.menu_book_outlined),
-            onPressed: _showTOC,
-            tooltip: 'Table of Contents',
-          ),
-          IconButton(
-            icon: const Icon(Icons.share_outlined),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Share feature coming soon!')),
-              );
-            },
-          ),
-        ],
       ),
       body: Stack(
         children: [
@@ -3815,6 +3942,14 @@ class _ChatBotDialogState extends State<ChatBotDialog> {
       }
     } catch (e) {
       print('[Main] Failed to save chat QA: $e');
+    }
+    // Trigger a background upload of any unsynced QA to Firebase so offline copies propagate quickly
+    try {
+      final sync = FirebaseSync('https://tashahit400-default-rtdb.asia-southeast1.firebasedatabase.app/');
+      // fire-and-forget upload; it's okay if this fails silently
+      sync.uploadUnsynced();
+    } catch (e) {
+      print('[Main] Background upload trigger failed: $e');
     }
     // Make sure we always return a structured result (answer + optional citations and bullets)
     final finalAnswer = answer.isNotEmpty ? answer : _response;
@@ -4516,7 +4651,7 @@ class _ChatBotDialogState extends State<ChatBotDialog> {
                               final noInfoExact = 'No relevant information found in the selected book.';
                               final isNoInfo = m['from'] == 'bot' && textVal.trim() == noInfoExact;
                               final grounded = (m['grounded'] as bool?) ?? false;
-                              final badge = grounded ? 'Book' : 'Web';
+                              final badge = grounded ? 'Book' : 'Bot';
                               // Show animated loading circle for bot processing or indexing
                               final isProcessing = m['from'] == 'bot' && m['status'] == 'processing';
                               final isIndexing = m['from'] == 'bot' && textVal.contains('Indexing book text');
@@ -4774,7 +4909,7 @@ class _ChatBotDialogState extends State<ChatBotDialog> {
     setState(() {
       _messages.add({
         'from': 'bot',
-        'text': 'ChatGPT is processing...',
+        'text': 'Bot thinking and extracting text...',
         'time': TimeOfDay.now().format(context),
         'status': 'processing'
       });
@@ -5191,275 +5326,7 @@ class _ChatBotDialogState extends State<ChatBotDialog> {
   }
 }
 
-// ---------------- Offline Chat Dialog ----------------
-class OfflineChatDialog extends StatefulWidget {
-  final String? selectedBook; // optional book id (filename) to scope offline queries
-  const OfflineChatDialog({super.key, this.selectedBook});
-
-  @override
-  State<OfflineChatDialog> createState() => _OfflineChatDialogState();
-}
-
-class _OfflineChatDialogState extends State<OfflineChatDialog> {
-  final TextEditingController _qController = TextEditingController();
-  String _answer = '';
-  bool _isLoading = false;
-  String? _selectedBook;
-
-  Future<void> _askOffline(String q) async {
-    setState(() {
-      _isLoading = true;
-      _answer = '';
-    });
-    try {
-      // Detect book-summary style queries and assemble a summary from stored chunks
-      final m = q.toLowerCase();
-      // If user asks what book is selected, reply locally
-      if (m.contains('what book') ||
-          m.contains('which book') ||
-          m.contains('what book have i selected') ||
-          m.contains('which book did i select')) {
-        setState(() => _answer = _selectedBook ?? widget.selectedBook ?? 'No book selected');
-        return;
-      }
-      final wantsSummary = m.contains('tell me about') ||
-          m.contains('summar') ||
-          m.contains('about the book') ||
-          m.contains('describe the book') ||
-          m.contains('what is this book');
-      final bookId = _selectedBook ?? widget.selectedBook;
-      final combinedQuery = (bookId != null) ? '[$bookId] $q' : q;
-
-      if (wantsSummary) {
-        if (bookId == null) {
-          setState(() => _answer = 'Please select a book to summarize.');
-          return;
-        }
-
-        // Try to retrieve top chunks for this book and assemble a concise offline summary
-        List<Map<String, dynamic>> chunks = [];
-        try {
-          // Try using VectorDB.topKChunksByEmbedding with a cached embedding of the book title or a neutral embedding
-          final seed = bookId;
-          final cached = await VectorDB.queryEmbedding(seed);
-          if (cached != null) {
-            chunks = await VectorDB.topKChunksByEmbedding(cached,
-                topK: 8, book: bookId);
-          } else {
-            // fallback: load a bunch of chunks directly
-            final all = await VectorDB.chunksForBook(bookId);
-            // pick top 8 by length (heuristic)
-            all.sort((a, b) =>
-                (b['text'] ?? '').toString().length.compareTo((a['text'] ?? '').toString().length));
-            chunks = all
-                .take(8)
-                .map((r) => {...r, 'score': 1.0, 'source': 'chunk'})
-                .toList();
-          }
-        } catch (_) {
-          chunks = [];
-        }
-
-        if (chunks.isEmpty) {
-          setState(() => _answer =
-          'No indexed excerpts available for this book. Please index the book first.');
-        } else {
-          final sb = StringBuffer();
-          sb.writeln('Offline summary (based on stored excerpts):\n');
-          for (var c in chunks) {
-            try {
-              final book = c['book'] ?? 'Unknown';
-              final start = c['start_page'] ?? '?';
-              final end = c['end_page'] ?? start;
-              final text = (c['text'] ?? '').toString();
-              sb.writeln('📖 $book (Pages $start–$end)');
-              sb.writeln(text.length > 400 ? '${text.substring(0, 400)}...' : text);
-              sb.writeln('\n---\n');
-            } catch (_) {}
-          }
-          sb.writeln(
-              '\n⚠️ Note: This offline summary is assembled from stored excerpts and may be partial.');
-          setState(() => _answer = sb.toString());
-        }
-        return;
-      }
-
-      // Default: Use VectorDB.answerQuery which will prefer cached embeddings, otherwise text fallback
-      final results =
-      await VectorDB.answerQuery(combinedQuery, topK: 3, book: bookId);
-      if (results.isEmpty) {
-        setState(() => _answer = 'No offline answer found — check this question online.');
-      } else {
-        // Prefer results that actually contain keywords from the user's question to avoid unrelated answers.
-        final norm = VectorDB.normalizeKey(combinedQuery);
-        final keywords = norm
-            .split(RegExp(r'\s+'))
-            .where((t) => t.isNotEmpty && t.length > 1)
-            .toList();
-
-        List<Map<String, dynamic>> filtered = results;
-        if (keywords.isNotEmpty) {
-          filtered = results.where((r) {
-            try {
-              final src = (r['source'] ?? 'qa').toString();
-              String text = '';
-              if (src == 'qa') {
-                text =
-                    '${(r['question'] ?? '')} ${(r['answer'] ?? '')}'.toString().toLowerCase();
-              } else {
-                text =
-                    '${(r['text'] ?? '')} ${(r['excerpt'] ?? '')}'.toString().toLowerCase();
-              }
-              for (var kw in keywords) {
-                if (kw.isEmpty) continue;
-                if (text.contains(kw)) return true;
-              }
-            } catch (_) {}
-            return false;
-          }).toList();
-        }
-
-        if (filtered.isEmpty) {
-          // No keyword-matching offline result — suggest checking online so user gets accurate answer
-          setState(() => _answer = 'No offline answer found — check this question online.');
-        } else {
-          // Prefer exact QA result with highest score and non-empty answer
-          Map<String, dynamic>? best;
-          for (var r in filtered) {
-            if (r['answer'] != null && (r['answer'] as String).trim().isNotEmpty) {
-              best = r;
-              break;
-            }
-          }
-          if (best == null) {
-            // fallback: show chunk excerpt from top filtered result
-            final top = filtered.first;
-            final src = top['source'] as String? ?? 'chunk';
-            if (src == 'qa') {
-              setState(() => _answer = (top['answer'] ?? '').toString());
-            } else {
-              final excerpt = (top['text'] ?? top['excerpt'] ?? '').toString();
-              if (excerpt.trim().isEmpty) {
-                setState(() => _answer = 'No offline answer found — check this question online.');
-              } else {
-                setState(() => _answer = 'Found related text: $excerpt');
-              }
-            }
-          } else {
-            setState(() => _answer = (best!['answer'] ?? '').toString());
-          }
-        }
-      }
-    } catch (e) {
-      setState(() => _answer = 'Offline query failed: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _qController.dispose();
-    super.dispose();
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedBook = widget.selectedBook;
-  }
-
-  Future<String?> _pickBookFromDocuments() async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final pdfDir = Directory('${dir.path}/BooksSource');
-      if (!await pdfDir.exists()) return null;
-      final files = pdfDir
-          .listSync()
-          .whereType<File>()
-          .where((f) => f.path.toLowerCase().endsWith('.pdf'))
-          .toList();
-      final pick = await showBookPickerDialog(context, files,
-          title: 'Select a book');
-      return pick;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Row(children: [
-        const Text('Offline Chat'),
-        const SizedBox(width: 12),
-        if ((_selectedBook ?? widget.selectedBook) != null)
-          Expanded(
-              child: Text((_selectedBook ?? widget.selectedBook)!,
-                  style: const TextStyle(fontSize: 13, color: Colors.black54),
-                  overflow: TextOverflow.ellipsis)),
-        IconButton(
-          icon: const Icon(Icons.change_circle_outlined),
-          tooltip: 'Change selected book',
-          onPressed: () async {
-            final pick = await _pickBookFromDocuments();
-            if (pick != null) setState(() => _selectedBook = pick);
-          },
-        )
-      ]),
-      content: SizedBox(
-        width: 560,
-        height: 320,
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                child: Container(
-                  alignment: Alignment.topLeft,
-                  child: Text(_answer.isEmpty
-                      ? 'Ask anything — offline answers are retrieved from saved Q/A and indexed books.'
-                      : _answer),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                      controller: _qController,
-                      decoration: const InputDecoration(
-                          hintText: 'Type your question...')),
-                ),
-                const SizedBox(width: 8),
-                _isLoading
-                    ? const SizedBox(
-                    width: 28,
-                    height: 28,
-                    child:
-                    CircularProgressIndicator(strokeWidth: 2))
-                    : IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: () {
-                    final q = _qController.text.trim();
-                    if (q.isNotEmpty) _askOffline(q);
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'))
-      ],
-    );
-  }
-}
+// Offline chat moved to ui/offline_chat_bot.dart
 
 // ---------------- Placeholder Pages ----------------
 class NotificationsPage extends StatelessWidget {
@@ -6339,6 +6206,24 @@ class SettingsPage extends StatelessWidget {
             const SizedBox(height: 40),
           ],
         ),
+      ),
+      bottomNavigationBar: AppFooter(
+        selectedIndex: 2,
+        onDestinationSelected: (index) {
+          if (index == 2) return; // already on Settings
+          if (index == 0) {
+            Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => HomePage(initialIndex: 0)),
+                (route) => false);
+            return;
+          }
+          if (index == 1) {
+            Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => HomePage(initialIndex: 1)),
+                (route) => false);
+            return;
+          }
+        },
       ),
     );
   }

@@ -12,6 +12,11 @@ class FirebaseSync {
 
   FirebaseSync(this.baseUrl);
 
+  // Process-wide guard to prevent concurrent uploads from multiple FirebaseSync
+  // instances. This avoids duplicate POSTs when multiple callers invoke
+  // `uploadUnsynced()` around the same time (e.g. auto-timer + manual sync).
+  static bool _uploadInProgress = false;
+
   String _ensureBase(String path) {
     var b = baseUrl;
     if (b.endsWith('/')) b = b.substring(0, b.length - 1);
@@ -83,37 +88,46 @@ class FirebaseSync {
   }
 
   Future<int> uploadUnsynced() async {
-    final unsynced = await _getUnsyncedLocalQa();
-    if (unsynced.isEmpty) return 0;
-    final deviceId = await _getDeviceId();
-    var uploaded = 0;
-    for (var row in unsynced) {
-      try {
-        final entry = {
-          'question': row['question'] ?? '',
-          'answer': row['answer'] ?? '',
-          'book': row['book'] ?? '',
-          'timestamp': DateTime.now().toUtc().toIso8601String(),
-          'deviceId': deviceId,
-        };
-        final url = _ensureBase('/knowledgeBase.json');
-        final resp = await http.post(Uri.parse(url), headers: {'Content-Type': 'application/json'}, body: jsonEncode(entry)).timeout(const Duration(seconds: 15));
-        if (resp.statusCode == 200) {
-          final parsed = jsonDecode(resp.body) as Map<String, dynamic>;
-          final firebaseId = parsed['name'] as String?;
-          if (firebaseId != null) {
-            final db = await VectorDB.openDb();
-            await db.insert('remote_sync', {'local_qa_id': row['local_id'], 'firebase_id': firebaseId, 'synced': 1, 'timestamp': DateTime.now().toUtc().toIso8601String()});
-            uploaded++;
-          }
-        } else {
-          print('[FirebaseSync] upload failed code=${resp.statusCode} body=${resp.body}');
-        }
-      } catch (e) {
-        print('[FirebaseSync] upload exception: $e');
-      }
+    if (_uploadInProgress) {
+      print('[FirebaseSync] uploadUnsynced skipped: already in progress');
+      return 0;
     }
-    return uploaded;
+    _uploadInProgress = true;
+    try {
+      final unsynced = await _getUnsyncedLocalQa();
+      if (unsynced.isEmpty) return 0;
+      final deviceId = await _getDeviceId();
+      var uploaded = 0;
+      for (var row in unsynced) {
+        try {
+          final entry = {
+            'question': row['question'] ?? '',
+            'answer': row['answer'] ?? '',
+            'book': row['book'] ?? '',
+            'timestamp': DateTime.now().toUtc().toIso8601String(),
+            'deviceId': deviceId,
+          };
+          final url = _ensureBase('/knowledgeBase.json');
+          final resp = await http.post(Uri.parse(url), headers: {'Content-Type': 'application/json'}, body: jsonEncode(entry)).timeout(const Duration(seconds: 15));
+          if (resp.statusCode == 200) {
+            final parsed = jsonDecode(resp.body) as Map<String, dynamic>;
+            final firebaseId = parsed['name'] as String?;
+            if (firebaseId != null) {
+              final db = await VectorDB.openDb();
+              await db.insert('remote_sync', {'local_qa_id': row['local_id'], 'firebase_id': firebaseId, 'synced': 1, 'timestamp': DateTime.now().toUtc().toIso8601String()});
+              uploaded++;
+            }
+          } else {
+            print('[FirebaseSync] upload failed code=${resp.statusCode} body=${resp.body}');
+          }
+        } catch (e) {
+          print('[FirebaseSync] upload exception: $e');
+        }
+      }
+      return uploaded;
+    } finally {
+      _uploadInProgress = false;
+    }
   }
 
   // Public helper: number of unsynced local QA entries
